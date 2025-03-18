@@ -1,0 +1,14 @@
+server:
+  port: 9885
+
+log:
+  path: /home/xxx_logs
+
+spring:
+  redis:
+    ##redis 单机环境配置
+    host: 101.126.5.141
+    port: 6379
+    password: lilishop
+    database: 2
+    ssl: false
