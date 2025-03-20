@@ -20,6 +20,7 @@ import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.crypto.SecureUtil;
 import cn.hutool.crypto.symmetric.AES;
+import cn.hutool.http.HttpRequest;
 import com.alibaba.fastjson.JSONObject;
 import com.google.gson.Gson;
 import com.mjkj.chatgpt.model.*;
@@ -27,6 +28,7 @@ import com.mjkj.chatgpt.service.IChatGPTService;
 import com.mjkj.chatgpt.service.WenDaService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -42,6 +44,8 @@ public class ChatGptController {
     private IChatGPTService chatGPTService;
     @Autowired
     private WenDaService wenDaService;
+    @Value("${config.aivt.url:http://127.0.0.1:8082/send}")
+    private String aivtUrl;
 
 //    private static String aesKey = "vWkzDxDfXruFpgjDH7Jy0mIWamCQvdct";
     private static String aesKey = "EgzdVGYalHE1pUNMO3CeIKatKmuocz07";
@@ -132,10 +136,67 @@ public class ChatGptController {
             if (ObjectUtil.isEmpty(wenDaParam)) {
                 return this.getErrorModel("参数为空2");
             }
-            WenDaBody wenDaBody = wenDaService.getWenDaContent(wenDaParam);
-            if (ObjectUtil.isEmpty(wenDaBody)) {
-                return this.getErrorModel("当前问题我回答不上来");
+            //判断wenDaParam中的prompt 是否为 小蓝小蓝 如果是 执行小蓝小蓝后面的切割,否则不操作
+            String prompt = wenDaParam.getPrompt();
+            WenDaBody wenDaBody = null;
+            if (StrUtil.isNotEmpty(prompt) && (prompt.contains("小蓝，小蓝")||prompt.contains("小蓝小蓝")  || prompt.contains("小兰，小兰") || prompt.contains("小兰小兰"))) {
+                //判断是否包含小蓝小蓝 或者 小兰小兰 或者 小蓝,小蓝 或者 小兰,小兰
+                //如果包含,则切割
+                String splits = null;
+                if (prompt.contains("小蓝小蓝")) {
+                    //切割从第5位开始截取
+                    splits = prompt.split("小蓝小蓝")[1];
+                } else if (prompt.contains("小兰小兰")) {
+                    //切割从第5位开始截取
+                    splits = prompt.split("小兰小兰")[1];
+                } else if (prompt.contains("小蓝，小蓝")) {
+                    //切割从第5位开始截取
+                    splits = prompt.split("小蓝，小蓝")[1];
+                } else if (prompt.contains("小兰，小兰")) {
+                    //切割从第5位开始截取
+                    splits = prompt.split("小兰，小兰")[1];
+                }
+                if (splits.length() <= 3) {
+                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"我在,请问有什么需要帮助的\"}";
+                    //调用失败传参
+                    HttpRequest request  = HttpRequest.post(aivtUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    return this.getSuccessModel("成功推送");
+                }
+                String split = splits;
+                wenDaParam.setPrompt(split);
+                wenDaBody  = wenDaService.getWenDaContent(wenDaParam);
+                if (ObjectUtil.isEmpty(wenDaBody)) {
+                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"小蓝还需要继续学习，您可以拨打24小时水务客服热线，我们有工作人员为您解答\"}";
+                    //调用失败传参
+                    HttpRequest request  = HttpRequest.post(aivtUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    return this.getSuccessModel("成功推送");
+                }else {
+                    //调用成功传参
+                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\""+wenDaBody.getContent()+"\"}";
+                    //调用失败传参
+                    HttpRequest request  = HttpRequest.post(aivtUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    return this.getSuccessModel("成功推送");
+                }
+
             }
+
+//            if (ObjectUtil.isEmpty(wenDaBody)) {
+//                String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"小蓝还需要继续学习，您可以拨打24小时水务客服热线，我们有工作人员为您解答\"}";
+//                //调用失败传参
+//                HttpRequest request  = HttpRequest.post(aivtUrl)
+//                        .header("Content-Type", "application/json");
+//                request.body(jsonStr)
+//                        .execute().body();
+//            }
             Gson gson = new Gson();
             String jsonStr = gson.toJson(wenDaBody);
             return this.getSuccessModel(jsonStr);
