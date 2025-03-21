@@ -18,12 +18,12 @@ import java.util.Optional;
 @Service
 public class WenDaServiceImpl implements WenDaService {
 
-    @Value("${config.max.scores:200}")
+    @Value("${config.max.scores:180}")
     private int maxScores;
     @Value("${config.wenda.step:5}")
     private String stepWenda;
     //memory_name
-    @Value("${config.wenda.memory.name:shuiwu}")
+    @Value("${config.wenda.memory.name:default}")
     private String memoryName;
     //url
     @Value("${config.wenda.url:http://127.0.0.1:17860/api/find_rtst_in_memory}")
