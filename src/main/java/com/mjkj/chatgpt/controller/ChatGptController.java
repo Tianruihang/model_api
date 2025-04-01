@@ -29,14 +29,12 @@ import com.mjkj.chatgpt.service.WenDaService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 
 @Slf4j
 @RestController
+@CrossOrigin(origins = "*", allowCredentials = "true")
 @RequestMapping("chatgpt")
 public class ChatGptController {
 
@@ -44,7 +42,7 @@ public class ChatGptController {
     private IChatGPTService chatGPTService;
     @Autowired
     private WenDaService wenDaService;
-    @Value("${config.aivt.url:http://127.0.0.1:8082/send}")
+    @Value("${config.aivt.url:http://192.168.1.24:8082/send}")
     private String aivtUrl;
 
 //    private static String aesKey = "vWkzDxDfXruFpgjDH7Jy0mIWamCQvdct";
@@ -128,6 +126,7 @@ public class ChatGptController {
         }
     }
 
+
     //闻达大模型
     @PostMapping({"/api/getWendaContent"})
     public ResultModel getWendaContent(@RequestBody WenDaParam wenDaParam) {
@@ -187,6 +186,73 @@ public class ChatGptController {
                     return this.getSuccessModel("成功推送");
                 }
 
+            }
+
+//            if (ObjectUtil.isEmpty(wenDaBody)) {
+//                String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"小蓝还需要继续学习，您可以拨打24小时水务客服热线，我们有工作人员为您解答\"}";
+//                //调用失败传参
+//                HttpRequest request  = HttpRequest.post(aivtUrl)
+//                        .header("Content-Type", "application/json");
+//                request.body(jsonStr)
+//                        .execute().body();
+//            }
+            Gson gson = new Gson();
+            String jsonStr = gson.toJson(wenDaBody);
+            return this.getSuccessModel(jsonStr);
+        } catch (Exception e) {
+            return this.getErrorModel(e.getMessage());
+        }
+    }
+
+    @PostMapping({"/api/getWendaContent/v2"})
+    public ResultModel getWendaContentV2(@RequestBody WenDaParam wenDaParam) {
+        try {
+            log.info("getWendaContent str:{}",wenDaParam);
+            if (ObjectUtil.isEmpty(wenDaParam)) {
+                return this.getErrorModel("参数为空2");
+            }
+            String prompt = wenDaParam.getPrompt();
+            WenDaBody wenDaBody = null;
+            if (StrUtil.isNotEmpty(prompt) ) {
+                //如果包含 唤醒小元 则发送 你好,我是小元,请问有什么需要帮助的
+                if (prompt.contains("唤醒小元")) {
+                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"你好,我是小元,请问有什么需要帮助的\"}";
+                    //调用传参
+                    HttpRequest request  = HttpRequest.post(aivtUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    return this.getSuccessModel("成功推送");
+                }
+                //如果包含,则切割
+                if (prompt.length() <= 3) {
+                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"我在,请问有什么需要帮助的\"}";
+                    //调用失败传参
+                    HttpRequest request  = HttpRequest.post(aivtUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    return this.getSuccessModel("成功推送");
+                }
+                wenDaBody  = wenDaService.getWenDaContent(wenDaParam);
+                if (ObjectUtil.isEmpty(wenDaBody)) {
+                    String jsonStr = "{\"type\":\"tuning\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\""+wenDaBody.getContent()+"\"}";
+                    //调用失败传参
+                    HttpRequest request  = HttpRequest.post(aivtUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    return this.getSuccessModel("成功推送");
+                }else {
+                    //调用成功传参
+                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\""+wenDaBody.getContent()+"\"}";
+                    //调用失败传参
+                    HttpRequest request  = HttpRequest.post(aivtUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    return this.getSuccessModel("成功推送");
+                }
             }
 
 //            if (ObjectUtil.isEmpty(wenDaBody)) {
