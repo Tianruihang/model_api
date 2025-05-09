@@ -31,6 +31,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -45,8 +47,13 @@ public class ChatGptController {
     private IChatGPTService chatGPTService;
     @Autowired
     private WenDaService wenDaService;
-    @Value("${config.aivt.url:http://192.168.1.24:8082/send}")
+    @Value("${config.aivt.url:http://120.211.84.149:8082/send}")
     private String aivtUrl;
+    @Value("${config.ai.wenda.url:http://120.211.84.149:17860/api/chat}")
+    private String aiWendaUrl;
+    @Value("${config.ai.video.url:http://127.0.0.1:8091/show/local")
+    private String aiVideoUrl;
+
 
 //    private static String aesKey = "vWkzDxDfXruFpgjDH7Jy0mIWamCQvdct";
     private static String aesKey = "EgzdVGYalHE1pUNMO3CeIKatKmuocz07";
@@ -385,6 +392,204 @@ public class ChatGptController {
         }
     }
 
+    @PostMapping({"/api/getWendaContent/v4"})
+    public ResultModel getWendaContentV4(@RequestBody WenDaParam wenDaParam) {
+        try {
+            log.info("getWendaContent str:{}",wenDaParam);
+            if (ObjectUtil.isEmpty(wenDaParam)) {
+                return this.getErrorModel("参数为空2");
+            }
+            String testStr = wenDaParam.getPrompt();
+            //判断是否包含 你好小元 你好小园 你好小原 你好小员 你好小圆 你好小袁 你好小猿 你好小缘 你好小辕 你好小媛 你好小元 你好小源
+            //如果包含,则切割
+            String[] prefixes = {
+                    "你好小园", "你好小原", "你好小员", "你好小圆", "你好小袁",
+                    "你好小猿", "你好小缘", "你好小辕", "你好小媛", "你好小元", "你好小源",
+                    "你好，小袁", "你好，小猿", "你好，小圆", "你好，小园",
+                    "你好，小原", "你好，小元", "你好，小源", "你好，小辕",
+            };
+            // Build regex pattern (without ^)
+            StringBuilder patternBuilder = new StringBuilder("(");  // Removed ^
+            for (int i = 0; i < prefixes.length; i++) {
+                if (i > 0) {
+                    patternBuilder.append("|");
+                }
+                patternBuilder.append(Pattern.quote(prefixes[i]));
+            }
+            patternBuilder.append(")");
+            Pattern pattern = Pattern.compile(patternBuilder.toString());
+            Matcher matcher = pattern.matcher(testStr);
+            boolean matches = matcher.find();
+            log.info("getWendaContent str:{} , matcher:{}",testStr,matches);
+            if (matches) {
+                log.info("pick success , matcher:{}",testStr,matcher.find());
+                String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"我在\"}";
+                //调用失败传参
+                HttpRequest request = HttpRequest.post(aivtUrl)
+                        .header("Content-Type", "application/json");
+                request.body(jsonStr)
+                        .execute().body();
+                log.info("pick success , matcher:{} return success",testStr,matches);
+                return this.getSuccessModel("成功推送");
+            }
+            log.info("getWendaContent str:{}",testStr);
+            //判断testStr长度是否大于3 如果是 则继续执行,否则直接返回
+            if (testStr.length() <= 5) {
+                return this.getErrorModel("回答长度太短");
+            }
+            String prompt = wenDaParam.getPrompt();
+            log.info("getWendaContentV4 str:{}",prompt);
+            WenDaBody wenDaBody = null;
+            if (StrUtil.isNotEmpty(prompt) ) {
+                //如果包含 唤醒小元 则发送 你好,我是小元,请问有什么需要帮助的
+                if (prompt.contains("唤醒小元")) {
+                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"你好，我是雄安兴元的数字人小元,请说小元来唤醒我。\"}";
+                    //调用传参
+                    HttpRequest request  = HttpRequest.post(aivtUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    return this.getSuccessModel("成功推送");
+                }
+                wenDaBody  = wenDaService.getWenDaContent(wenDaParam);
+                if (ObjectUtil.isEmpty(wenDaBody)) {
+                    //调用失败则再次调用本地大模型接口: 127.0.0.1:17860/chat  {"prompt":"测试传输","keyword":"测试传输","temperature":0.8,"top_p":0.8,"max_length":4096,"history":[]}
+                    String sendStr = "{\"prompt\":\"你是智能百科,每个问题尽量不超过20字,问题如下:"+prompt+"\",\"keyword\":\"你是智能百科,每个问题尽量不超过20字,问题如下:"+prompt+"\",\"temperature\":0.8,\"top_p\":0.8,\"max_length\":4096,\"history\":[]}";
+                    log.info("getWendaContentV4 str:{}",sendStr);
+                    HttpRequest requestWenda = HttpRequest.post(aiWendaUrl)
+                            .header("Content-Type", "application/json");
+                    String result = requestWenda.body(sendStr)
+                            .execute().body();
+                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\""+result+"\"}";
+                    log.info("getWendaContentV4 str:{}",jsonStr);
+                    //调用失败传参
+                    HttpRequest request  = HttpRequest.post(aivtUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    return this.getSuccessModel("成功推送");
+                }else {
+                    //调用成功传参
+                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\""+wenDaBody.getContent()+"\"}";
+                    //调用失败传参
+                    HttpRequest request  = HttpRequest.post(aivtUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    return this.getSuccessModel("成功推送");
+                }
+            }
+            Gson gson = new Gson();
+            String jsonStr = gson.toJson(wenDaBody);
+            return this.getSuccessModel(jsonStr);
+        } catch (Exception e) {
+            return this.getErrorModel(e.getMessage());
+        }
+    }
+
+    @PostMapping({"/api/getWendaContent/zhonghang"})
+    public ResultModel getWendaContentZhonghang(@RequestBody WenDaParam wenDaParam) {
+        try {
+            log.info("getWendaContent str:{}",wenDaParam);
+            if (ObjectUtil.isEmpty(wenDaParam)) {
+                return this.getErrorModel("参数为空2");
+            }
+            String testStr = wenDaParam.getPrompt();
+            //判断是否包含 你好小元 你好小园 你好小原 你好小员 你好小圆 你好小袁 你好小猿 你好小缘 你好小辕 你好小媛 你好小元 你好小源
+            //如果包含,则切割
+            String[] prefixes = {
+                    "你好小园", "你好小原", "你好小员", "你好小圆", "你好小袁",
+                    "你好小猿", "你好小缘", "你好小辕", "你好小媛", "你好小元", "你好小源",
+                    "你好，小袁", "你好，小猿", "你好，小圆", "你好，小园",
+                    "你好，小原", "你好，小元", "你好，小源", "你好，小辕",
+            };
+            // Build regex pattern (without ^)
+            StringBuilder patternBuilder = new StringBuilder("(");  // Removed ^
+            for (int i = 0; i < prefixes.length; i++) {
+                if (i > 0) {
+                    patternBuilder.append("|");
+                }
+                patternBuilder.append(Pattern.quote(prefixes[i]));
+            }
+            patternBuilder.append(")");
+            Pattern pattern = Pattern.compile(patternBuilder.toString());
+            Matcher matcher = pattern.matcher(testStr);
+            boolean matches = matcher.find();
+            log.info("getWendaContent str:{} , matcher:{}",testStr,matches);
+            if (matches) {
+                log.info("pick success , matcher:{}",testStr,matcher.find());
+                String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"我在\"}";
+                //调用失败传参
+                HttpRequest request = HttpRequest.post(aivtUrl)
+                        .header("Content-Type", "application/json");
+                request.body(jsonStr)
+                        .execute().body();
+                log.info("pick success , matcher:{} return success",testStr,matches);
+                return this.getSuccessModel("成功推送");
+            }
+            log.info("getWendaContent str:{}",testStr);
+            //判断testStr长度是否大于3 如果是 则继续执行,否则直接返回
+            if (testStr.length() <= 5) {
+                return this.getErrorModel("回答长度太短");
+            }
+            String prompt = wenDaParam.getPrompt();
+            log.info("getWendaContentV4 str:{}",prompt);
+            WenDaBody wenDaBody = null;
+            if (StrUtil.isNotEmpty(prompt) ) {
+                //如果包含 唤醒小元 则发送 你好,我是小元,请问有什么需要帮助的
+                if (prompt.contains("唤醒小元")) {
+                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"你好，我是中行的数字人小元,请说小元来唤醒我。\"}";
+                    //调用传参
+                    HttpRequest request  = HttpRequest.post(aiVideoUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    return this.getSuccessModel("成功推送");
+                }
+                wenDaBody  = wenDaService.getWenDaContent(wenDaParam);
+                if (ObjectUtil.isEmpty(wenDaBody)) {
+                    //调用失败则再次调用本地大模型接口: 127.0.0.1:17860/chat  {"prompt":"测试传输","keyword":"测试传输","temperature":0.8,"top_p":0.8,"max_length":4096,"history":[]}
+                    String result = "error.MP4";
+                    String jsonStr = "{\"type\":\"easy_wav2lip\",\"video_path\":{\"path\":\""+result+"\",\"format\":\"mp4\"},\"audio_path\":\"baidu_9.wav\",\"insert_index\":-1}";
+                    log.info("getWendaContentV4 str:{}",jsonStr);
+                    //调用失败传参
+                    HttpRequest request  = HttpRequest.post(aiVideoUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    return this.getSuccessModel("成功推送");
+                }else {
+                    //调用成功传参
+                    String jsonStr = "{\"type\":\"easy_wav2lip\",\"video_path\":{\"path\":\""+extractBracesContent(wenDaBody.getContent())+"\",\"format\":\"mp4\"},\"audio_path\":\"baidu_9.wav\",\"insert_index\":-1}";
+                    //调用失败传参
+                    HttpRequest request  = HttpRequest.post(aiVideoUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    return this.getSuccessModel("成功推送");
+                }
+            }
+            Gson gson = new Gson();
+            String jsonStr = gson.toJson(wenDaBody);
+            return this.getSuccessModel(jsonStr);
+        } catch (Exception e) {
+            return this.getErrorModel(e.getMessage());
+        }
+    }
+
+
+    public static List<String> extractBracesContent(String input) {
+        List<String> matches = new ArrayList<>();
+        // 正则表达式匹配{}中的内容
+        Pattern pattern = Pattern.compile("\\{(.*?)\\}");
+        Matcher matcher = pattern.matcher(input);
+        // 遍历所有匹配项
+        while (matcher.find()) {
+            // 提取捕获组1的内容（即大括号内的部分）
+            matches.add(matcher.group(1));
+        }
+        return matches;
+    }
 
     private ResultModel getErrorModel(String str){
         ResultModel model=new ResultModel();

@@ -26,7 +26,7 @@ public class WenDaServiceImpl implements WenDaService {
     @Value("${config.wenda.memory.name:default}")
     private String memoryName;
     //url
-    @Value("${config.wenda.url:http://127.0.0.1:17860/api/find_rtst_in_memory}")
+    @Value("${config.wenda.url:http://120.211.84.149:17860/api/find_rtst_in_memory}")
     private String urlWenda;
 
     @Override
