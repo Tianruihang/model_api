@@ -22,19 +22,37 @@ import cn.hutool.crypto.SecureUtil;
 import cn.hutool.crypto.symmetric.AES;
 import cn.hutool.http.HttpRequest;
 import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson.TypeReference;
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.reflect.TypeToken;
 import com.mjkj.chatgpt.model.*;
+import com.mjkj.chatgpt.service.BankQuestionService;
 import com.mjkj.chatgpt.service.IChatGPTService;
 import com.mjkj.chatgpt.service.WenDaService;
+import com.mjkj.chatgpt.strategy.KeywordStrategyFactory;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.util.StreamUtils;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.RequestBody;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 
 @Slf4j
@@ -46,15 +64,31 @@ public class ChatGptController {
     @Autowired
     private IChatGPTService chatGPTService;
     @Autowired
+    private BankQuestionService bankQuestionService;
+    @Autowired
     private WenDaService wenDaService;
-    @Value("${config.aivt.url:http://120.211.84.149:8082/send}")
+    @Value("${config.aivt.url:http://127.0.0.1:8082/send}")
     private String aivtUrl;
     @Value("${config.ai.wenda.url:http://120.211.84.149:17860/api/chat}")
     private String aiWendaUrl;
-    @Value("${config.ai.video.url:http://127.0.0.1:8091/show/local")
+    @Value("${config.ai.video.url:http://127.0.0.1:8091/show/local}")
     private String aiVideoUrl;
+    @Value("http://192.168.1.27:9001/v1/chat-messages")
+    private String aiDifyChatMessagesUrl;
+    @Value("${config.ai.dify.key:Bearer app-P9erUWPiZx6HZ8zOj9hW5LzE}")
+    private String aiDifyKey;
+    @Value("${config.ai.prompt.value:你是智能百科,每个问题尽量不超过20字,回答内容不要带格式}")
+    private String aiPromptValue;
+    //设置最大问题数量
+    @Value("${config.ai.question.max:5}")
+    private int maxQuestionWaitingCount;
 
-
+    @Autowired
+    RedisTemplate redisTemplate;
+    private final String currentCountKey = "api:currentCount"; // Redis中存储当前计数的键
+    private final String questionSetKey = "ceyan:questions";
+    private final String questionWaitingKey = "flask_cache_ceyan:questionWaiting:python"; // Redis中存储问题等待队列的键
+    private final String limitCountKey = "api:limitCount"; // Redis中存储限制调用次数的键
 //    private static String aesKey = "vWkzDxDfXruFpgjDH7Jy0mIWamCQvdct";
     private static String aesKey = "EgzdVGYalHE1pUNMO3CeIKatKmuocz07";
 
@@ -395,7 +429,7 @@ public class ChatGptController {
     @PostMapping({"/api/getWendaContent/v4"})
     public ResultModel getWendaContentV4(@RequestBody WenDaParam wenDaParam) {
         try {
-            log.info("getWendaContent str:{}",wenDaParam);
+            log.info("getWendaContentV4 str:{}",wenDaParam);
             if (ObjectUtil.isEmpty(wenDaParam)) {
                 return this.getErrorModel("参数为空2");
             }
@@ -434,7 +468,7 @@ public class ChatGptController {
             }
             log.info("getWendaContent str:{}",testStr);
             //判断testStr长度是否大于3 如果是 则继续执行,否则直接返回
-            if (testStr.length() <= 5) {
+            if (testStr.length() <= 3) {
                 return this.getErrorModel("回答长度太短");
             }
             String prompt = wenDaParam.getPrompt();
@@ -452,14 +486,21 @@ public class ChatGptController {
                     return this.getSuccessModel("成功推送");
                 }
                 wenDaBody  = wenDaService.getWenDaContent(wenDaParam);
+                log.info("getWendaContentV4 wenDaBody:{}",wenDaBody);
                 if (ObjectUtil.isEmpty(wenDaBody)) {
                     //调用失败则再次调用本地大模型接口: 127.0.0.1:17860/chat  {"prompt":"测试传输","keyword":"测试传输","temperature":0.8,"top_p":0.8,"max_length":4096,"history":[]}
-                    String sendStr = "{\"prompt\":\"你是智能百科,每个问题尽量不超过20字,问题如下:"+prompt+"\",\"keyword\":\"你是智能百科,每个问题尽量不超过20字,问题如下:"+prompt+"\",\"temperature\":0.8,\"top_p\":0.8,\"max_length\":4096,\"history\":[]}";
+                    String sendStr = "{\"prompt\":\"你是智能百科,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"keyword\":\"你是智能百科,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"temperature\":0.8,\"top_p\":0.8,\"max_length\":4096,\"history\":[]}";
                     log.info("getWendaContentV4 str:{}",sendStr);
                     HttpRequest requestWenda = HttpRequest.post(aiWendaUrl)
                             .header("Content-Type", "application/json");
                     String result = requestWenda.body(sendStr)
                             .execute().body();
+                    // 将result中的 \n 替换成句号
+                    //猫砂 \n 猫粮 \n
+                    result = result.replaceAll("\\\\n", "。");
+                    //猫砂、猫粮、猫砂盆、猫抓板、猫草、疫苗、猫窝等
+                    //将result中 、替换成逗号
+                    result = result.replaceAll("、", ",");
                     String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\""+result+"\"}";
                     log.info("getWendaContentV4 str:{}",jsonStr);
                     //调用失败传参
@@ -472,11 +513,11 @@ public class ChatGptController {
                     //调用成功传参
                     String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\""+wenDaBody.getContent()+"\"}";
                     //调用失败传参
-                    HttpRequest request  = HttpRequest.post(aivtUrl)
-                            .header("Content-Type", "application/json");
-                    request.body(jsonStr)
-                            .execute().body();
-                    return this.getSuccessModel("成功推送");
+//                    HttpRequest request  = HttpRequest.post(aivtUrl)
+//                            .header("Content-Type", "application/json");
+//                    request.body(jsonStr)
+//                            .execute().body();
+                    return this.getSuccessModel(wenDaBody.getContent());
                 }
             }
             Gson gson = new Gson();
@@ -495,78 +536,61 @@ public class ChatGptController {
                 return this.getErrorModel("参数为空2");
             }
             String testStr = wenDaParam.getPrompt();
-            //判断是否包含 你好小元 你好小园 你好小原 你好小员 你好小圆 你好小袁 你好小猿 你好小缘 你好小辕 你好小媛 你好小元 你好小源
-            //如果包含,则切割
-            String[] prefixes = {
-                    "你好小园", "你好小原", "你好小员", "你好小圆", "你好小袁",
-                    "你好小猿", "你好小缘", "你好小辕", "你好小媛", "你好小元", "你好小源",
-                    "你好，小袁", "你好，小猿", "你好，小圆", "你好，小园",
-                    "你好，小原", "你好，小元", "你好，小源", "你好，小辕",
-            };
-            // Build regex pattern (without ^)
-            StringBuilder patternBuilder = new StringBuilder("(");  // Removed ^
-            for (int i = 0; i < prefixes.length; i++) {
-                if (i > 0) {
-                    patternBuilder.append("|");
-                }
-                patternBuilder.append(Pattern.quote(prefixes[i]));
-            }
-            patternBuilder.append(")");
-            Pattern pattern = Pattern.compile(patternBuilder.toString());
-            Matcher matcher = pattern.matcher(testStr);
-            boolean matches = matcher.find();
-            log.info("getWendaContent str:{} , matcher:{}",testStr,matches);
-            if (matches) {
-                log.info("pick success , matcher:{}",testStr,matcher.find());
-                String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"我在\"}";
-                //调用失败传参
-                HttpRequest request = HttpRequest.post(aivtUrl)
-                        .header("Content-Type", "application/json");
-                request.body(jsonStr)
-                        .execute().body();
-                log.info("pick success , matcher:{} return success",testStr,matches);
-                return this.getSuccessModel("成功推送");
-            }
+            String result = KeywordStrategyFactory.checkPrompt(testStr);
             log.info("getWendaContent str:{}",testStr);
             //判断testStr长度是否大于3 如果是 则继续执行,否则直接返回
-            if (testStr.length() <= 5) {
+            if (testStr.length() < 3) {
                 return this.getErrorModel("回答长度太短");
             }
             String prompt = wenDaParam.getPrompt();
             log.info("getWendaContentV4 str:{}",prompt);
             WenDaBody wenDaBody = null;
-            if (StrUtil.isNotEmpty(prompt) ) {
+            Map resultJson = new HashMap();
+            resultJson.put("tag","javaApi");
+            if (StrUtil.isNotEmpty(result) ) {
                 //如果包含 唤醒小元 则发送 你好,我是小元,请问有什么需要帮助的
-                if (prompt.contains("唤醒小元")) {
-                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"你好，我是中行的数字人小元,请说小元来唤醒我。\"}";
+                if (result.equals("你好")) {
+                    redisTemplate.opsForValue().set(questionWaitingKey, maxQuestionWaitingCount, 15, TimeUnit.SECONDS);
+//                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"你好，我是雄安兴元的数字人小元,请说小元来唤醒我。\"}";
                     //调用传参
-                    HttpRequest request  = HttpRequest.post(aiVideoUrl)
-                            .header("Content-Type", "application/json");
-                    request.body(jsonStr)
-                            .execute().body();
-                    return this.getSuccessModel("成功推送");
+//                    HttpRequest request  = HttpRequest.post(aivtUrl)
+//                            .header("Content-Type", "application/json");
+//                    request.body(jsonStr)
+//                            .execute().body();
+                    resultJson.put("type","wenda_Hello");
+                    resultJson.put("text","你好呀");
+                    log.info("getWendaContentV4 str:{}",result);
+                    return this.getSuccessModel(new Gson().toJson(resultJson));
                 }
+                //判断是否存在redis
+                if (!redisTemplate.hasKey(questionWaitingKey)) {
+                    //如果存在,则返回
+                    return this.getErrorModel("没有激活小元,请先唤醒小元");
+                }
+                //收集问题并存入mysql中
+                BankQuestionModel bankQuestionModel = new BankQuestionModel();
+                bankQuestionModel.setQuestion(prompt);
+                bankQuestionModel.setCreateDate(new Date());
+                bankQuestionService.insertQuestion(bankQuestionModel);
                 wenDaBody  = wenDaService.getWenDaContent(wenDaParam);
+
                 if (ObjectUtil.isEmpty(wenDaBody)) {
                     //调用失败则再次调用本地大模型接口: 127.0.0.1:17860/chat  {"prompt":"测试传输","keyword":"测试传输","temperature":0.8,"top_p":0.8,"max_length":4096,"history":[]}
-                    String result = "error.MP4";
-                    String jsonStr = "{\"type\":\"easy_wav2lip\",\"video_path\":{\"path\":\""+result+"\",\"format\":\"mp4\"},\"audio_path\":\"baidu_9.wav\",\"insert_index\":-1}";
-                    log.info("getWendaContentV4 str:{}",jsonStr);
-                    //调用失败传参
-                    HttpRequest request  = HttpRequest.post(aiVideoUrl)
+                    String sendStr = "{\"prompt\":\"你是智能百科,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"keyword\":\"你是智能百科,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"temperature\":0.8,\"top_p\":0.8,\"max_length\":4096,\"history\":[]}";
+                    log.info("getWendaContentV4 str:{}",sendStr);
+                    HttpRequest requestWenda = HttpRequest.post(aiWendaUrl)
                             .header("Content-Type", "application/json");
-                    request.body(jsonStr)
+                    result = requestWenda.body(sendStr)
                             .execute().body();
-                    return this.getSuccessModel("成功推送");
+                    resultJson.put("type","wenda_chat");
+                    resultJson.put("text",result);
+                    log.info("getWendaContentV4 str:{}",result);
+                    return this.getSuccessModel(new Gson().toJson(resultJson));
                 }else {
                     //调用成功传参
-                    String jsonStr = "{\"type\":\"easy_wav2lip\",\"video_path\":{\"path\":\""+extractBracesContent(wenDaBody.getContent())+"\",\"format\":\"mp4\"},\"audio_path\":\"baidu_9.wav\",\"insert_index\":-1}";
-                    //调用失败传参
-                    HttpRequest request  = HttpRequest.post(aiVideoUrl)
-                            .header("Content-Type", "application/json");
-                    request.body(jsonStr)
-                            .execute().body();
-                    return this.getSuccessModel("成功推送");
+                    resultJson.put("type","wenda_rag");
+                    resultJson.put("text",wenDaBody.getContent());
+                    return this.getSuccessModel(new Gson().toJson(resultJson));
                 }
             }
             Gson gson = new Gson();
@@ -575,6 +599,352 @@ public class ChatGptController {
         } catch (Exception e) {
             return this.getErrorModel(e.getMessage());
         }
+    }
+
+
+    @PostMapping({"/api/getWendaContent/zhonghang/active"})
+    public ResultModel getWendaContentZhonghangActice(@RequestBody WenDaParam wenDaParam) {
+        try {
+            log.info("getWendaContent str:{}",wenDaParam);
+            if (ObjectUtil.isEmpty(wenDaParam)) {
+                return this.getErrorModel("参数为空2");
+            }
+            String testStr = wenDaParam.getPrompt();
+            String result = KeywordStrategyFactory.checkPrompt(testStr);
+            log.info("getWendaContent str:{}",testStr);
+            String prompt = wenDaParam.getPrompt();
+            log.info("getWendaContentV4 str:{}",prompt);
+            WenDaBody wenDaBody = null;
+            Map resultJson = new HashMap();
+            resultJson.put("tag","javaApi");
+            if (StrUtil.isNotEmpty(result) ) {
+                //如果包含 唤醒小元 则发送 你好,我是小元,请问有什么需要帮助的
+                if (result.equals("测验")) {
+                    redisTemplate.opsForValue().set(questionWaitingKey, maxQuestionWaitingCount, 15, TimeUnit.SECONDS);
+                    resultJson.put("type","wenda_Hello");
+                    resultJson.put("text","你好呀");
+                    log.info("getWendaContentV4 str:{}",result);
+                    return this.getSuccessModel(new Gson().toJson(resultJson));
+                }
+                //判断是否存在redis
+                if (!redisTemplate.hasKey(questionWaitingKey)) {
+                    //如果存在,则返回
+                    return this.getErrorModel("没有激活小元,请先唤醒小元");
+                }
+            }
+            Gson gson = new Gson();
+            String jsonStr = gson.toJson(resultJson);
+            resultJson.put("type","wenda_Hello");
+            resultJson.put("text",result);
+            return this.getSuccessModel(jsonStr);
+        } catch (Exception e) {
+            return this.getErrorModel(e.getMessage());
+        }
+    }
+
+    //智力问答接口
+    @PostMapping({"/api/getWendaContent/ceyan"})
+    public ResultModel getZhiLiWenDaContent(@RequestBody WenDaParam wenDaParam) {
+        try {
+            log.info("getZhiLiWenDaContent str:{}",wenDaParam);
+            if (ObjectUtil.isEmpty(wenDaParam)) {
+                return this.getErrorModel("参数为空2");
+            }
+            //获取问题
+            List<AnswerModel> answerModels = readJson();
+            String testStr = wenDaParam.getPrompt();
+            String result = KeywordStrategyFactory.checkPrompt(testStr);
+            //判断result 是否为 测验 如果是 则查询知识库
+            if (result.equals("测验")) {
+                redisTemplate.opsForValue().set(currentCountKey, -70);
+                redisTemplate.opsForValue().set(questionWaitingKey, maxQuestionWaitingCount, 15, TimeUnit.SECONDS);
+                log.info("pick success , result:{}",testStr,result);
+                String jsonStr = "{\"type\":\"easy_wav2lip\",\"video_path\":{\"path\":\"ceyan.mp4\",\"format\":\"mp4\"},\"audio_path\":\"baidu_9.wav\",\"insert_index\":0,\"interrupt\":true}";
+                //调用失败传参
+                HttpRequest request = HttpRequest.post(aiVideoUrl)
+                        .header("Content-Type", "application/json");
+                request.body(jsonStr)
+                        .execute().body();
+                //随机抽取3个问题并放入redis的set中
+                if (ObjectUtil.isEmpty(answerModels)) {
+                    return this.getErrorModel("没有找到问题");
+                }
+                //随机抽取3个问题
+                //将问题放入redis的中
+                //清除questionSetKey
+                if (redisTemplate.hasKey(questionSetKey)) redisTemplate.delete(questionSetKey);
+                for (int i = 0; i < 3; i++) {
+                    int randomIndex = (int) (Math.random() * answerModels.size());
+                    AnswerModel answerModel = answerModels.get(randomIndex);
+                    redisTemplate.opsForList().leftPush(questionSetKey, answerModel.getVideoName());
+                    redisTemplate.opsForList().leftPush(questionSetKey, answerModel.getAnswer());
+                }
+                //推送第一个问题
+                String firstQuestion = (String) redisTemplate.opsForList().rightPop(questionSetKey);
+                String firstQuestionJson = "{\"type\":\"easy_wav2lip\",\"video_path\":{\"path\":\"" + firstQuestion+" \",\"format\":\"mp4\"},\"audio_path\":\"baidu_9.wav\",\"insert_index\":-1}";
+                //调用失败传参
+                HttpRequest requestQ = HttpRequest.post(aiVideoUrl)
+                        .header("Content-Type", "application/json");
+                requestQ.body(firstQuestionJson)
+                        .execute().body();
+                //开始计时 30s
+                redisTemplate.opsForValue().set(limitCountKey, -10);
+                //根据firstQuestion匹配answerModels中的question
+                //保证格式
+                String question = answerModels.stream().filter(answerModel -> answerModel.getVideoName().equals(firstQuestion)).findFirst().get().getQuestion();
+
+                //推送前端展示文字
+                return this.getSuccessModel(question+",请回答正确或错误");
+            }
+            //判断是否存在 正确 错误
+            if (result.equals("正确") || result.equals("错误")) {
+                redisTemplate.opsForValue().set(questionWaitingKey, maxQuestionWaitingCount, 15, TimeUnit.SECONDS);
+                //取出redis的List中的答案
+                String answerResult = (String) redisTemplate.opsForList().rightPop(questionSetKey);
+                if (result.contains(answerResult)) {
+                    //出栈下一个问题
+                    String nextQuestion = (String) redisTemplate.opsForList().rightPop(questionSetKey);
+                    if (StrUtil.isEmpty(nextQuestion)) {
+                        //如果没有下一个问题,则提示完毕
+                        String jsonStr = "{\"type\":\"easy_wav2lip\",\"video_path\":{\"path\":\"answerComplete.mp4\",\"format\":\"mp4\"},\"audio_path\":\"baidu_9.wav\",\"insert_index\":-1}";
+                        //调用失败传参
+                        HttpRequest request = HttpRequest.post(aiVideoUrl)
+                                .header("Content-Type", "application/json");
+                        request.body(jsonStr)
+                                .execute().body();
+                        //删除questionSetKey
+                        redisTemplate.delete(limitCountKey);
+                        //延时5s推送
+
+                        return this.getSuccessModel("恭喜您,答题完成");
+                    } else {
+                        //如果是正确或者错误,则直接调用视频
+                        String jsonStr = "{\"type\":\"easy_wav2lip\",\"video_path\":{\"path\":\"answerRight.mp4\",\"format\":\"mp4\"},\"audio_path\":\"baidu_9.wav\",\"insert_index\":-1}";
+                        //调用失败传参
+                        HttpRequest request = HttpRequest.post(aiVideoUrl)
+                                .header("Content-Type", "application/json");
+                        request.body(jsonStr)
+                                .execute().body();
+                        //开始计时 30s
+                        redisTemplate.opsForValue().set(limitCountKey, -10);
+                        String nextQuestionJson = "{\"type\":\"easy_wav2lip\",\"video_path\":{\"path\":\"" + nextQuestion+" \",\"format\":\"mp4\"},\"audio_path\":\"baidu_9.wav\",\"insert_index\":-1}";
+                        //如果有下一个问题,则推送下一个问题
+                        HttpRequest requestN = HttpRequest.post(aiVideoUrl)
+                                .header("Content-Type", "application/json");
+                        requestN.body(nextQuestionJson)
+                                .execute().body();
+                        //保证格式
+                        String question = answerModels.stream().filter(answerModel -> answerModel.getVideoName().equals(nextQuestion)).findFirst().get().getQuestion();
+                        //延时5s推送
+
+                        return this.getSuccessModel(question+",请回答正确或错误");
+                    }
+                }else {
+                    //如果是正确或者错误,则直接调用视频
+                    String jsonStr = "{\"type\":\"easy_wav2lip\",\"video_path\":{\"path\":\"answerError.mp4\",\"format\":\"mp4\"},\"audio_path\":\"baidu_9.wav\",\"insert_index\":-1}";
+                    //调用失败传参
+                    HttpRequest request = HttpRequest.post(aiVideoUrl)
+                            .header("Content-Type", "application/json");
+                    request.body(jsonStr)
+                            .execute().body();
+                    //删除questionSetKey
+                    redisTemplate.delete(questionSetKey);
+                    //删除limitCountKey
+                    redisTemplate.delete(limitCountKey);
+                }
+                log.info("pick success , result:{}",testStr,result);
+                //延时5s推送
+
+                return this.getSuccessModel("回答错误,期待您的下次挑战");
+            }
+            return this.getErrorModel(result);
+
+        } catch (Exception e) {
+            return this.getErrorModel(e.getMessage());
+        }
+    }
+
+    public List<AnswerModel> readJson() throws IOException {
+        // 1. 定位资源（路径从 resources 根目录开始）
+        ClassPathResource resource = new ClassPathResource("json/data.json");
+
+        // 2. 获取输入流（关键！避免直接使用 File 对象）
+        try (InputStream inputStream = resource.getInputStream()) {
+            // 3. 读取为字符串
+            String jsonContent = StreamUtils.copyToString(inputStream, StandardCharsets.UTF_8);
+
+            // 4. 解析为对象（以 List 为例）
+            ObjectMapper objectMapper = new ObjectMapper();
+            //使用Gson
+            Gson gson = new Gson();
+            List<AnswerModel> answerModels = gson.fromJson(jsonContent, new TypeReference<List<AnswerModel>>(){}.getType());
+            // 5. 返回结果
+            return answerModels;
+        }catch (Exception e) {
+            log.error("读取JSON文件失败: {}", e.getMessage());
+            return new ArrayList<>(); // 返回空列表或处理异常
+        }
+    }
+
+    //提供模型名称接口
+    @GetMapping("/v1/models")
+    public Map getModels() {
+        //创建一个Map对象
+        Map<String, Object> map = new HashMap<>();
+        //"object": "list",
+        //        "data": [
+        //            {
+        //                "id": "chatglm3-6b",  # 这个要与你在 Dify 配置中填写的 model 名一致
+        //                "object": "model",
+        //                "created": 1699999999,
+        //                "owned_by": "chatglm-local"
+        //            }
+        //        ]
+        map.put("object", "list");
+        List<Map<String, Object>> data = new ArrayList<>();
+        Map<String, Object> model = new HashMap<>();
+        model.put("id", "Wenda");  // 这个要与你在 Dify 配置中填写的 model 名一致
+        model.put("object", "model");
+        model.put("created", System.currentTimeMillis() / 1000);
+        model.put("owned_by", "chatglm-local");
+        data.add(model);
+        map.put("data", data);
+        return map;
+    }
+
+
+    //基于openAI格式调用闻达大模型
+    @PostMapping("/v1/chat/completions")
+    public Map chatToWenda(@RequestBody OpenAIModelParam request) {
+        log.info("chatToWenda , request:{}", request);
+        //获取request中的messages
+        List<OpenAIMessage> messages = request.getMessages();
+        String msg = "";
+        for (OpenAIMessage message : messages) {
+            //判断message的role是否为user
+            if ("user".equals(message.getRole())) {
+                //获取content
+                String content = message.getContent();
+                msg = msg + content;
+            }
+        }
+        //创建WenDaParam对象
+        HttpRequest requestWenda = HttpRequest.post(aiWendaUrl)
+                .header("Content-Type", "application/json");
+
+        String sendStr = "{\"prompt\":\"你是智能百科,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+msg+"\",\"keyword\":\"你是智能百科,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+msg+"\",\"temperature\":0.8,\"top_p\":0.8,\"max_length\":4096,\"history\":[]}";
+        String result = requestWenda.body(sendStr)
+                .execute().body();
+        Map<String, Object> map = new HashMap<>();
+        map.put("id", "chatcmpl-"+ System.currentTimeMillis());
+        map.put("object", "chat.completion");
+        map.put("created", System.currentTimeMillis() / 1000);
+        map.put("model", "Wenda");
+        List<Map> choices = new ArrayList<>();
+        Map choice = new HashMap();
+        choice.put("delta", new HashMap<String, String>() {{
+            put("content", result);
+        }});
+        choice.put("finish_reason", "stop");
+        choices.add(choice);
+        map.put("choices", choices);
+        return map;
+
+    }
+    //调用dify大模型
+    @PostMapping("/v1/chat/completions/dify")
+    public Map chatToDify(@RequestBody OpenAIModelParam aiRequest) throws IOException{
+        log.info("chatToDify , request:{}", aiRequest);
+        OkHttpClient client = new OkHttpClient.Builder()
+                .connectTimeout(20, TimeUnit.SECONDS)   // 连接超时
+                .readTimeout(0, TimeUnit.SECONDS)       // 读取超时（0 表示永不超时，适用于 SSE）
+                .writeTimeout(10, TimeUnit.SECONDS)     // 写入超时
+                .build();
+        //获取request中的messages
+        List<OpenAIMessage> messages = aiRequest.getMessages();
+        String msg = "";
+        for (OpenAIMessage message : messages) {
+            //判断message的role是否为user
+            if ("user".equals(message.getRole())) {
+                //获取content
+                String content = message.getContent();
+                msg = content;
+            }
+        }
+        Map <String, Object> data = new HashMap<>();
+        data.put("inputs", new HashMap<>());
+        data.put("query", msg);
+        data.put("response_mode", "streaming");
+        data.put("conversation_id", "");
+        data.put("user", "abc-123");
+        data.put("is_retry ",false);
+        //如果有文件，则添加到files中
+        List<Map<String, Object>> files = new ArrayList<>();
+        data.put("files", files);
+        //调用dify大模型接口
+        Request request = new Request.Builder()
+                .url(aiDifyChatMessagesUrl)
+                .header("Authorization", aiDifyKey)
+                .header("Content-Type", "application/json")
+                .post(okhttp3.RequestBody.create(new Gson().toJson(data), MediaType.parse("application/json")))
+                .build();
+
+        Call call = client.newCall(request);
+        Response response = call.execute();
+        //判断response是否为null
+        Map<String, Object> map = new HashMap<>();
+        map.put("id", "chatcmpl-"+ System.currentTimeMillis());
+        map.put("object", "chat.completion");
+        map.put("created", System.currentTimeMillis() / 1000);
+        map.put("model", "Wenda");
+        List<Map> choices = new ArrayList<>();
+        Map choice = new HashMap();
+        //判断postResult 中 的status是否为200
+        if (response.code() != 200) {
+            choice.put("delta", new HashMap<String, String>() {{
+                put("content", "模型调用失败，请稍后再试或联系管理员。");
+            }});
+            choice.put("finish_reason", "stop");
+            choices.add(choice);
+            map.put("choices", choices);
+            return map;
+        }
+        BufferedReader reader = new BufferedReader(new InputStreamReader(response.body().byteStream()));
+        String line;
+        StringBuilder fullAnswer = new StringBuilder();
+
+        while ((line = reader.readLine()) != null) {
+            if (!line.startsWith("data:")) continue;
+
+            String jsonLine = line.substring(5).trim();
+            JsonObject obj = JsonParser.parseString(jsonLine).getAsJsonObject();
+            String event = obj.get("event").getAsString();
+
+            if ("message".equals(event)) {
+                String fragment = obj.get("answer").getAsString();
+                fullAnswer.append(fragment);
+            }
+
+            if ("workflow_finished".equals(event)) {
+                JsonObject outputs = obj.getAsJsonObject("data").getAsJsonObject("outputs");
+                if (outputs != null && outputs.has("answer")) {
+                    String finalAnswer = outputs.get("answer").getAsString();
+                    System.out.println("Final Answer from outputs: " + finalAnswer);
+                } else {
+                    System.out.println("No final answer in workflow_finished");
+                }
+            }
+        }
+        //将result中的 message提取出来
+        String result = String.valueOf(fullAnswer);
+        log.info("chatToDify result:{}", result);
+        choice.put("delta", new HashMap<String, String>() {{
+            put("content", result);
+        }});
+        choice.put("finish_reason", "stop");
+        choices.add(choice);
+        map.put("choices", choices);
+        return map;
     }
 
 

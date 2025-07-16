@@ -26,6 +26,7 @@ import com.mjkj.chatgpt.service.IChatGPTService;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -45,6 +46,8 @@ public class ChatGPTServiceImpl implements IChatGPTService {
 
     @Autowired
     RedisTemplate redisTemplate;
+    @Value("${config.ai.video.url:http://127.0.0.1:8091/show/local}")
+    private String aiVideoUrl;
 
     //获取GPT内容
     @Override
@@ -183,5 +186,24 @@ public class ChatGPTServiceImpl implements IChatGPTService {
             e.printStackTrace();
         }
         return null;
+    }
+
+    @Override
+    public boolean pushVideoToFront(String videoPath) {
+        //创建随机数 从1 -8 随机
+        String jsonStr = "{\"type\":\"easy_wav2lip\",\"video_path\":{\"path\":\""+videoPath+"\",\"format\":\"mp4\"},\"audio_path\":\"baidu_9.wav\",\"insert_index\":-1}";
+        log.info("getWendaContentV4 str:{}",jsonStr);
+        //调用失败传参
+        HttpRequest request  = HttpRequest.post(aiVideoUrl)
+                .header("Content-Type", "application/json");
+        String body = request.body(jsonStr)
+                .execute().body();
+        log.info("****** body *****" + body);
+        //判断返回值是否包含success
+        if (body.contains("操作成功")) {
+            log.info("视频推送成功");
+            return true;
+        }
+        return false;
     }
 }

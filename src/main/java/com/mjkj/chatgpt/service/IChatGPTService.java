@@ -33,4 +33,7 @@ public interface IChatGPTService {
     String getChatGptPublic(ChatGptPublicParam param);
 
     String getWenxinContent(ChatGptPublicParam param);
+
+    //推送 播放视频到前端
+    boolean pushVideoToFront(String videoPath);
 }
