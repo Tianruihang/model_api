@@ -87,7 +87,7 @@ public class ChatGptController {
     RedisTemplate redisTemplate;
     private final String currentCountKey = "api:currentCount"; // Redis中存储当前计数的键
     private final String questionSetKey = "ceyan:questions";
-    private final String questionWaitingKey = "flask_cache_ceyan:questionWaiting:python"; // Redis中存储问题等待队列的键
+    private final String questionWaitingKey = "ceyan:questionWaiting:python"; // Redis中存储问题等待队列的键
     private final String limitCountKey = "api:limitCount"; // Redis中存储限制调用次数的键
 //    private static String aesKey = "vWkzDxDfXruFpgjDH7Jy0mIWamCQvdct";
     private static String aesKey = "EgzdVGYalHE1pUNMO3CeIKatKmuocz07";
@@ -540,7 +540,7 @@ public class ChatGptController {
             log.info("getWendaContent str:{}",testStr);
             //判断testStr长度是否大于3 如果是 则继续执行,否则直接返回
             if (testStr.length() < 3) {
-                return this.getErrorModel("回答长度太短");
+                return this.getErrorModel("你的问题我没有听清");
             }
             String prompt = wenDaParam.getPrompt();
             log.info("getWendaContentV4 str:{}",prompt);
@@ -569,14 +569,14 @@ public class ChatGptController {
                 }
                 //收集问题并存入mysql中
                 BankQuestionModel bankQuestionModel = new BankQuestionModel();
-                bankQuestionModel.setQuestion(prompt);
+                bankQuestionModel.setQuestion(removeEmoji(prompt));
                 bankQuestionModel.setCreateDate(new Date());
                 bankQuestionService.insertQuestion(bankQuestionModel);
                 wenDaBody  = wenDaService.getWenDaContent(wenDaParam);
 
                 if (ObjectUtil.isEmpty(wenDaBody)) {
                     //调用失败则再次调用本地大模型接口: 127.0.0.1:17860/chat  {"prompt":"测试传输","keyword":"测试传输","temperature":0.8,"top_p":0.8,"max_length":4096,"history":[]}
-                    String sendStr = "{\"prompt\":\"你是智能百科,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"keyword\":\"你是智能百科,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"temperature\":0.8,\"top_p\":0.8,\"max_length\":4096,\"history\":[]}";
+                    String sendStr = "{\"prompt\":\"你是中国银行数字人,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"keyword\":\"你是中国银行数字人,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"temperature\":0.8,\"top_p\":0.8,\"max_length\":4096,\"history\":[]}";
                     log.info("getWendaContentV4 str:{}",sendStr);
                     HttpRequest requestWenda = HttpRequest.post(aiWendaUrl)
                             .header("Content-Type", "application/json");
@@ -600,7 +600,9 @@ public class ChatGptController {
             return this.getErrorModel(e.getMessage());
         }
     }
-
+    public String removeEmoji(String input) {
+        return input.replaceAll("[^\\u0000-\\uFFFF]", ""); // 移除非基本平面字符（如 Emoji）
+    }
 
     @PostMapping({"/api/getWendaContent/zhonghang/active"})
     public ResultModel getWendaContentZhonghangActice(@RequestBody WenDaParam wenDaParam) {
@@ -620,7 +622,7 @@ public class ChatGptController {
             if (StrUtil.isNotEmpty(result) ) {
                 //如果包含 唤醒小元 则发送 你好,我是小元,请问有什么需要帮助的
                 if (result.equals("测验")) {
-                    redisTemplate.opsForValue().set(questionWaitingKey, maxQuestionWaitingCount, 15, TimeUnit.SECONDS);
+                    redisTemplate.opsForValue().set(questionWaitingKey, maxQuestionWaitingCount, 8, TimeUnit.SECONDS);
                     resultJson.put("type","wenda_Hello");
                     resultJson.put("text","你好呀");
                     log.info("getWendaContentV4 str:{}",result);

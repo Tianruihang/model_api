@@ -89,21 +89,21 @@ public class ApiCallerService {
     /**
      *  定时归档
      */
-    @Scheduled(cron = "0 0 0 * * ?") // 每天午夜归档
-    public void archiveData() {
-        // 归档逻辑
-        log.info("开始归档数据...");
-        analysisService.processAllQuestions();
-        log.info("数据归档完成");
-    }
-    /**
-     * 定时统计 定时归档结束后10分钟执行
-     */
-    @Scheduled(cron = "0 10 0 * * ?") // 每天午夜归档后10分钟统计
-    public void generateStatistics() {
-        log.info("开始生成统计数据...");
-        statisticsService.generateAndSaveStatistics(new java.util.Date());
-        log.info("统计数据生成完成");
-    }
+//    @Scheduled(cron = "0 0 0 * * ?") // 每天午夜归档
+//    public void archiveData() {
+//        // 归档逻辑
+//        log.info("开始归档数据...");
+//        analysisService.processAllQuestions();
+//        log.info("数据归档完成");
+//    }
+//    /**
+//     * 定时统计 定时归档结束后10分钟执行
+//     */
+//    @Scheduled(cron = "0 10 0 * * ?") // 每天午夜归档后10分钟统计
+//    public void generateStatistics() {
+//        log.info("开始生成统计数据...");
+//        statisticsService.generateAndSaveStatistics(new java.util.Date());
+//        log.info("统计数据生成完成");
+//    }
 
 }
