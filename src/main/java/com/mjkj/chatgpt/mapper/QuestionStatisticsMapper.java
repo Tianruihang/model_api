@@ -34,8 +34,9 @@ public interface QuestionStatisticsMapper {
     List<QuestionStatisticsModel> selectAllStatistics();
 
     // 根据日期范围查询统计数据
-    @Select("SELECT * FROM question_statistics WHERE statistics_date BETWEEN #{startDate} AND #{endDate} " +
-            "ORDER BY statistics_date DESC, question_count DESC")
+    @Select("SELECT category_name AS categoryName, SUM(question_count) AS questionCount FROM question_statistics WHERE" +
+            " statistics_date >= #{startDate} AND statistics_date <= #{endDate} " +
+            "GROUP BY category_name ORDER BY questionCount DESC")
     List<QuestionStatisticsModel> selectStatisticsByDateRange(@Param("startDate") Date startDate, 
                                                            @Param("endDate") Date endDate);
 

@@ -107,8 +107,8 @@ public class QuestionAnalysisController {
                     map.put("categoryId", stat.getCategoryId());
                     map.put("categoryName", stat.getCategoryName());
                     map.put("questionCount", stat.getQuestionCount());
-                    map.put("statisticsDate", stat.getStatisticsDate());
-                    map.put("createDate", stat.getCreateDate());
+//                    map.put("statisticsDate", stat.getStatisticsDate());
+//                    map.put("createDate", stat.getCreateDate());
                     return map;
                 })
                 .collect(Collectors.toList());

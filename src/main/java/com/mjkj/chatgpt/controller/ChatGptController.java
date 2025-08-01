@@ -69,7 +69,7 @@ public class ChatGptController {
     private WenDaService wenDaService;
     @Value("${config.aivt.url:http://127.0.0.1:8082/send}")
     private String aivtUrl;
-    @Value("${config.ai.wenda.url:http://120.211.84.149:17860/api/chat}")
+    @Value("${config.ai.wenda.url:http://127.0.0.1:17860/api/chat}")
     private String aiWendaUrl;
     @Value("${config.ai.video.url:http://127.0.0.1:8091/show/local}")
     private String aiVideoUrl;
@@ -558,22 +558,21 @@ public class ChatGptController {
 //                    request.body(jsonStr)
 //                            .execute().body();
                     resultJson.put("type","wenda_Hello");
-                    resultJson.put("text","你好呀");
+                    resultJson.put("text","你好呀,我是中行数字人,请问有什么我可以帮您");
                     log.info("getWendaContentV4 str:{}",result);
                     return this.getSuccessModel(new Gson().toJson(resultJson));
                 }
                 //判断是否存在redis
-                if (!redisTemplate.hasKey(questionWaitingKey)) {
-                    //如果存在,则返回
-                    return this.getErrorModel("没有激活小元,请先唤醒小元");
-                }
+//                if (!redisTemplate.hasKey(questionWaitingKey)) {
+//                    //如果存在,则返回
+//                    return this.getErrorModel("没有激活小元,请先唤醒小元");
+//                }
                 //收集问题并存入mysql中
                 BankQuestionModel bankQuestionModel = new BankQuestionModel();
                 bankQuestionModel.setQuestion(removeEmoji(prompt));
                 bankQuestionModel.setCreateDate(new Date());
                 bankQuestionService.insertQuestion(bankQuestionModel);
                 wenDaBody  = wenDaService.getWenDaContent(wenDaParam);
-
                 if (ObjectUtil.isEmpty(wenDaBody)) {
                     //调用失败则再次调用本地大模型接口: 127.0.0.1:17860/chat  {"prompt":"测试传输","keyword":"测试传输","temperature":0.8,"top_p":0.8,"max_length":4096,"history":[]}
                     String sendStr = "{\"prompt\":\"你是中国银行数字人,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"keyword\":\"你是中国银行数字人,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"temperature\":0.8,\"top_p\":0.8,\"max_length\":4096,\"history\":[]}";
@@ -587,9 +586,14 @@ public class ChatGptController {
                     log.info("getWendaContentV4 str:{}",result);
                     return this.getSuccessModel(new Gson().toJson(resultJson));
                 }else {
+                    //删除questionWaitingKey
+                    if (redisTemplate.hasKey(questionWaitingKey)) {
+                        redisTemplate.delete(questionWaitingKey);
+                    }
                     //调用成功传参
                     resultJson.put("type","wenda_rag");
                     resultJson.put("text",wenDaBody.getContent());
+                    log.info("getWendaContentV4 str:{}",wenDaBody.getContent());
                     return this.getSuccessModel(new Gson().toJson(resultJson));
                 }
             }
