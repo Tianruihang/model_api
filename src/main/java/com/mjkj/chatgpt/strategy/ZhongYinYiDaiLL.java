@@ -1,0 +1,25 @@
+package com.mjkj.chatgpt.strategy;
+
+import com.mjkj.chatgpt.utils.PinyinUtils;
+
+import java.util.Arrays;
+
+public class ZhongYinYiDaiLL implements KeywordStrategy{
+
+    private static final String[] KEYWORDS = {"中银易贷的利率","中银易贷利率","中银易贷利率是多少","中银易贷利率计算方式"};
+
+    // 把 KEYWORDS 转成拼音备用
+    private static final String[] KEYWORDS_PINYIN = Arrays.stream(KEYWORDS)
+            .map(PinyinUtils::toPinyin)
+            .toArray(String[]::new);
+    @Override
+    public boolean matches(String prompt) {
+        String promptPinyin = PinyinUtils.toPinyin(prompt);
+        return Arrays.stream(KEYWORDS_PINYIN).anyMatch(promptPinyin::contains);
+    }
+
+    @Override
+    public String getKeywordType() {
+        return "中银易贷利率如何确定？";
+    }
+}

@@ -18,7 +18,7 @@ import java.util.Optional;
 @Service
 public class WenDaServiceImpl implements WenDaService {
 
-    @Value("${config.max.scores:200}")
+    @Value("${config.max.scores:180}")
     private int maxScores;
     @Value("${config.wenda.step:1}")
     private String stepWenda;
