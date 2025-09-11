@@ -36,6 +36,7 @@ public class WenDaServiceImpl implements WenDaService {
         String step = stepWenda;
         String memory_name = memoryName;
         String jsonStr = "{\"prompt\":\"" + prompt + "\",\"step\":" + step + ",\"memory_name\":\"" + memory_name + "\"}";
+        log.info("****** jsonStr *****" + jsonStr);
         HttpRequest request  = HttpRequest.post(url)
                 .header("Content-Type", "application/json");
         request.body(jsonStr)
@@ -43,12 +44,13 @@ public class WenDaServiceImpl implements WenDaService {
         String body = request.body(jsonStr)
                         .execute().body();
         //
-        log.info("****** body *****" + body);
+
         //将body转为List<WenDaBody>
         Gson gson = new Gson();
         Type listType = new TypeToken<List<WenDaBody>>() {}.getType();
         // 将 JSON 字符串解析为 List<WenDaBody>
         List<WenDaBody> wenDaBodyList = gson.fromJson(body, listType);
+        log.info("****** body *****" + wenDaBodyList);
         // 遍历 List<WenDaBody> 并找出wenDaBody最少的score中的值,
         int minScore = maxScores;
         // 使用 Stream API 找到最小 score 的对象
@@ -56,6 +58,16 @@ public class WenDaServiceImpl implements WenDaService {
                 .min((body1, body2) -> Integer.compare(body1.getScore(), body2.getScore()));
         if (minScoreBody.isPresent()) {
             WenDaBody wenDaBody = minScoreBody.get();
+            //优先查找标题一样的
+            if (wenDaBody.getTitle().equals(wenDaParam.getPrompt())) {
+                log.info("****** wenDaBody *****" + wenDaBody);
+                //根据  = 后面的结果
+                //判断是否包含= 如何是则替换
+                if (wenDaBody.getContent().contains("=")) {
+                    wenDaBody.setContent( wenDaBody.getContent().split("=")[1]);
+                }
+                return wenDaBody;
+            }
             // 获取最小 score 的值
             minScore = wenDaBody.getScore();
             log.info("****** minScore *****" + minScore);
@@ -64,6 +76,9 @@ public class WenDaServiceImpl implements WenDaService {
             if (minScore<= maxScores) {
                 // 处理最小 score 对应的对象
                 log.info("****** wenDaBody *****" + wenDaBody);
+                if (wenDaBody.getContent().contains("=")) {
+                    wenDaBody.setContent( wenDaBody.getContent().split("=")[1]);
+                }
                 return wenDaBody;
             }
         }

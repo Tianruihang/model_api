@@ -19,6 +19,6 @@ public class ZhongYinYiDaiQX implements KeywordStrategy{
     }
     @Override
     public String getKeywordType() {
-        return "中银易贷期限为多久";
+        return "ZYYD中银易贷期限为多久";
     }
 }

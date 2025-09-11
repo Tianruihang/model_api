@@ -6,7 +6,8 @@ import java.util.Arrays;
 
 public class SuiXinZhiDaiTQHK implements KeywordStrategy{
     private static final String[] KEYWORDS = {"随心智贷如何办理提前还款","随心智贷提前还款如何办理",
-            "随心智贷提前还款流程"};
+            "随心智贷提前还款流程","随心自带如何办理提前还款","随心自带提前还款如何办理",
+            "随心自带提前还款流程"};
 
     // 把 KEYWORDS 转成拼音备用
     private static final String[] KEYWORDS_PINYIN = Arrays.stream(KEYWORDS)

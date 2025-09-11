@@ -20,6 +20,6 @@ public class ZhongYinYiDaiDKZT implements KeywordStrategy{
 
     @Override
     public String getKeywordType() {
-        return "中银易贷贷款主体和申请条件是什么";
+        return "ZYYD中银易贷贷款主体和申请条件是什么";
     }
 }

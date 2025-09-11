@@ -19,6 +19,6 @@ public class ZhongYinYiDaiJXFS implements KeywordStrategy{
 
     @Override
     public String getKeywordType() {
-        return "中银易贷计息方式是什么";
+        return "ZYYD中银易贷计息方式是什么";
     }
 }

@@ -35,12 +35,13 @@ public class ApiCallerService {
     RedisTemplate redisTemplate;
 
     private final String limitCountKey = "api:limitCount"; // Redis中存储限制调用次数的键
-    private final String currentCountKey = "api:currentCount"; // Redis中存储当前计数的键
+    private final String currentCountKey = "api:currentCount"; // Redis中存储当前播放视频下标（0-6）
     private final String questionSetKey="ceyan:questions";
+    private final String videoIndexKey = "api:videoIndex"; // 顺序播放的视频索引（1-7）
     /**
      * 定时调用API的方法
      */
-//    @Scheduled(fixedRateString = "${apiCallerProperties.interval:1}000")
+    @Scheduled(fixedRateString = "${apiCallerProperties.interval:1}000")
     public void callApiTask() {
         if (!redisTemplate.hasKey(currentCountKey)){
             // 如果Redis中没有当前计数的键，则初始化为1
@@ -49,14 +50,21 @@ public class ApiCallerService {
         } else {
             int counter =  (int) redisTemplate.opsForValue().get(currentCountKey);
             //判断当前计数是否超过最大值
-            if (counter >= 30 ) {
-                int i = (int) (Math.random() * 10) + 1;
-                String num = "explain"+i+".mp4";
-                boolean boo =  chatGPTService.pushVideoToFront(num);
-                if (boo ) {
+            if (counter >= 40 ) {
+                // 初始化或获取顺序播放索引
+                if (!redisTemplate.hasKey(videoIndexKey)) {
+                    redisTemplate.opsForValue().set(videoIndexKey, 1);
+                }
+                int currentVideoIndex = (int) redisTemplate.opsForValue().get(videoIndexKey);
+                String num = "explain" + currentVideoIndex + ".mp4";
+                boolean boo = chatGPTService.pushVideoToFront(num);
+                if (boo) {
+                    // 播放成功后，索引顺序递增并循环到1-7
+                    int nextVideoIndex = currentVideoIndex >= 7 ? 1 : currentVideoIndex + 1;
+                    redisTemplate.opsForValue().set(videoIndexKey, nextVideoIndex);
                     // 如果API调用成功，重置计数器
                     redisTemplate.opsForValue().set(currentCountKey, -40);
-                    log.info("API调用成功，当前计数已重置为1");
+                    log.info("API调用成功，顺序播放视频: {}，下一个索引: {}", num, nextVideoIndex);
                 } else {
                     counter++;
                     redisTemplate.opsForValue().set(currentCountKey, counter);

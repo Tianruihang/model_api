@@ -19,6 +19,6 @@ public class ZhongYinYiDaiYQQS implements KeywordStrategy{
     }
     @Override
     public String getKeywordType() {
-        return "中银易贷逾期清收";
+        return "ZYYD中银易贷逾期清收";
     }
 }

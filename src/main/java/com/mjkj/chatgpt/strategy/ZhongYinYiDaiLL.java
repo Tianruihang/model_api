@@ -20,6 +20,6 @@ public class ZhongYinYiDaiLL implements KeywordStrategy{
 
     @Override
     public String getKeywordType() {
-        return "中银易贷利率如何确定？";
+        return "中银易贷利率如何确定";
     }
 }

@@ -5,7 +5,7 @@ import com.mjkj.chatgpt.utils.PinyinUtils;
 import java.util.Arrays;
 
 public class SuiXinZhiDaiSYLL implements KeywordStrategy{
-    private static final String[] KEYWORDS = {"随心智贷适用利率", "随心智贷利率", "随心智贷利息"};
+    private static final String[] KEYWORDS = {"随心智贷适用利率", "随心智贷利率", "随心智贷利息","随心自带适用利率","随心自带利率","随心自带利息"};
 
     // 把 KEYWORDS 转成拼音备用
     private static final String[] KEYWORDS_PINYIN = Arrays.stream(KEYWORDS)

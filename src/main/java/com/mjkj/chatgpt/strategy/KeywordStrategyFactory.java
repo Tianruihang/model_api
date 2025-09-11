@@ -9,7 +9,7 @@ public class KeywordStrategyFactory {
             new XiaolanStrategy(),
             new WakeupXiaoyuanStrategy(),
             new HelloStrategy(),
-            new CeyanStrategy(),
+            new XiaoyuanStrategy(),
             new AnswerFalseStrategy(),
             new AnswerTrueStrategy(),
             new CreditCard(),
@@ -30,6 +30,8 @@ public class KeywordStrategyFactory {
             new SuiXinZhiDaiSYLL(),
             new SuiXinZhiDaiTQHK(),
             new SuiXinZhiDaiZDHK(),
+            new ShangHuShouKuanMa(),
+            new GeRenJiQiJieShouHui(),
             new DefaultStrategy() // 必须放在最后
     );
 

@@ -18,6 +18,6 @@ public class ZhongYinYiDaiHK implements KeywordStrategy{
     }
     @Override
     public String getKeywordType() {
-        return "中银易贷如何还款";
+        return "ZYYD中银易贷如何还款";
     }
 }

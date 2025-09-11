@@ -30,6 +30,7 @@ import com.google.gson.reflect.TypeToken;
 import com.mjkj.chatgpt.model.*;
 import com.mjkj.chatgpt.service.BankQuestionService;
 import com.mjkj.chatgpt.service.IChatGPTService;
+import com.mjkj.chatgpt.service.SemanticMatchService;
 import com.mjkj.chatgpt.service.WenDaService;
 import com.mjkj.chatgpt.strategy.KeywordStrategyFactory;
 import lombok.extern.slf4j.Slf4j;
@@ -65,6 +66,8 @@ public class ChatGptController {
     private IChatGPTService chatGPTService;
     @Autowired
     private BankQuestionService bankQuestionService;
+    @Autowired
+    private SemanticMatchService semanticMatchService;
     @Autowired
     private WenDaService wenDaService;
     @Value("${config.aivt.url:http://127.0.0.1:8082/send}")
@@ -548,9 +551,11 @@ public class ChatGptController {
             Map resultJson = new HashMap();
             resultJson.put("tag","javaApi");
             if (StrUtil.isNotEmpty(result) ) {
+                if (!result.equals("其他"))
+                    prompt = result;
                 //如果包含 唤醒小元 则发送 你好,我是小元,请问有什么需要帮助的
-                if (result.equals("你好")) {
-                    redisTemplate.opsForValue().set(questionWaitingKey, maxQuestionWaitingCount, 15, TimeUnit.SECONDS);
+                if (result.equals("你好")|| result.equals("小元")) {
+                    redisTemplate.opsForValue().set(questionWaitingKey+ wenDaParam.getSession_id(), maxQuestionWaitingCount, 15, TimeUnit.SECONDS);
 //                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"你好，我是雄安兴元的数字人小元,请说小元来唤醒我。\"}";
                     //调用传参
 //                    HttpRequest request  = HttpRequest.post(aivtUrl)
@@ -572,23 +577,24 @@ public class ChatGptController {
                 bankQuestionModel.setQuestion(removeEmoji(prompt));
                 bankQuestionModel.setCreateDate(new Date());
                 bankQuestionService.insertQuestion(bankQuestionModel);
+                log.info("prompt---------:{}",prompt);
+                wenDaParam.setPrompt(prompt);
                 wenDaBody  = wenDaService.getWenDaContent(wenDaParam);
                 if (ObjectUtil.isEmpty(wenDaBody)) {
                     //调用失败则再次调用本地大模型接口: 127.0.0.1:17860/chat  {"prompt":"测试传输","keyword":"测试传输","temperature":0.8,"top_p":0.8,"max_length":4096,"history":[]}
-                    String sendStr = "{\"prompt\":\"你是中国银行数字人,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"keyword\":\"你是中国银行数字人,每个问题尽量不超过20字,回答内容不要带格式,问题如下:"+prompt+"\",\"temperature\":0.8,\"top_p\":0.8,\"max_length\":4096,\"history\":[]}";
-                    log.info("getWendaContentV4 str:{}",sendStr);
-                    HttpRequest requestWenda = HttpRequest.post(aiWendaUrl)
-                            .header("Content-Type", "application/json");
-                    result = requestWenda.body(sendStr)
-                            .execute().body();
+                    SimpleSemanticRequest request = new SimpleSemanticRequest();
+                    request.setQuestion(prompt);
+                    request.setThreshold(0.5d);
+                    SimpleSemanticResult matchResult = semanticMatchService.simpleMatch(request);
+                    log.info("getWendaContentV4 str:{}",request.toString());
                     resultJson.put("type","wenda_chat");
-                    resultJson.put("text",result);
+                    resultJson.put("text",matchResult);
                     log.info("getWendaContentV4 str:{}",result);
                     return this.getSuccessModel(new Gson().toJson(resultJson));
                 }else {
                     //删除questionWaitingKey
-                    if (redisTemplate.hasKey(questionWaitingKey)) {
-                        redisTemplate.delete(questionWaitingKey);
+                    if (redisTemplate.hasKey(questionWaitingKey+ wenDaParam.getSession_id())) {
+                        redisTemplate.delete(questionWaitingKey+ wenDaParam.getSession_id());
                     }
                     //调用成功传参
                     resultJson.put("type","wenda_rag");
@@ -625,8 +631,8 @@ public class ChatGptController {
             resultJson.put("tag","javaApi");
             if (StrUtil.isNotEmpty(result) ) {
                 //如果包含 唤醒小元 则发送 你好,我是小元,请问有什么需要帮助的
-                if (result.equals("测验")) {
-                    redisTemplate.opsForValue().set(questionWaitingKey, maxQuestionWaitingCount, 8, TimeUnit.SECONDS);
+                if (result.equals("小元")) {
+                    redisTemplate.opsForValue().set(questionWaitingKey + wenDaParam.getSession_id(), maxQuestionWaitingCount, 8, TimeUnit.SECONDS);
                     resultJson.put("type","wenda_Hello");
                     resultJson.put("text","你好呀");
                     log.info("getWendaContentV4 str:{}",result);
