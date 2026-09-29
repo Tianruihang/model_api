@@ -50,6 +50,8 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -76,9 +78,9 @@ public class ChatGptController {
     private String aiWendaUrl;
     @Value("${config.ai.video.url:http://127.0.0.1:8091/show/local}")
     private String aiVideoUrl;
-    @Value("http://192.168.1.27:9001/v1/chat-messages")
+    @Value("https://api.dify.ai/v1/chat-messages")
     private String aiDifyChatMessagesUrl;
-    @Value("${config.ai.dify.key:Bearer app-P9erUWPiZx6HZ8zOj9hW5LzE}")
+    @Value("${config.ai.dify.key:Bearer app-JUw10TXkdHm6EfwLO6MpagrB}")
     private String aiDifyKey;
     @Value("${config.ai.prompt.value:你是智能百科,每个问题尽量不超过20字,回答内容不要带格式}")
     private String aiPromptValue;
@@ -94,6 +96,8 @@ public class ChatGptController {
     private final String limitCountKey = "api:limitCount"; // Redis中存储限制调用次数的键
 //    private static String aesKey = "vWkzDxDfXruFpgjDH7Jy0mIWamCQvdct";
     private static String aesKey = "EgzdVGYalHE1pUNMO3CeIKatKmuocz07";
+    
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
 
 
 
@@ -555,7 +559,7 @@ public class ChatGptController {
                     prompt = result;
                 //如果包含 唤醒小元 则发送 你好,我是小元,请问有什么需要帮助的
                 if (result.equals("你好")|| result.equals("小元")) {
-                    redisTemplate.opsForValue().set(questionWaitingKey+ wenDaParam.getSession_id(), maxQuestionWaitingCount, 15, TimeUnit.SECONDS);
+                    redisTemplate.opsForValue().set(questionWaitingKey+ wenDaParam.getSession_id(), maxQuestionWaitingCount, 10, TimeUnit.SECONDS);
 //                    String jsonStr = "{\"type\":\"reread\",\"platform\":\"webui\",\"username\":\"游客\",\"content\":\"你好，我是雄安兴元的数字人小元,请说小元来唤醒我。\"}";
                     //调用传参
 //                    HttpRequest request  = HttpRequest.post(aivtUrl)
@@ -632,9 +636,9 @@ public class ChatGptController {
             if (StrUtil.isNotEmpty(result) ) {
                 //如果包含 唤醒小元 则发送 你好,我是小元,请问有什么需要帮助的
                 if (result.equals("小元")) {
-                    redisTemplate.opsForValue().set(questionWaitingKey + wenDaParam.getSession_id(), maxQuestionWaitingCount, 8, TimeUnit.SECONDS);
+                    redisTemplate.opsForValue().set(questionWaitingKey + wenDaParam.getSession_id(), maxQuestionWaitingCount, 38, TimeUnit.SECONDS);
                     resultJson.put("type","wenda_Hello");
-                    resultJson.put("text","你好呀");
+                    resultJson.put("text","你好呀,我是中行数字人,请问有什么我可以帮您");
                     log.info("getWendaContentV4 str:{}",result);
                     return this.getSuccessModel(new Gson().toJson(resultJson));
                 }
@@ -647,6 +651,78 @@ public class ChatGptController {
             Gson gson = new Gson();
             String jsonStr = gson.toJson(resultJson);
             resultJson.put("type","wenda_Hello");
+            resultJson.put("text",result);
+            return this.getSuccessModel(jsonStr);
+        } catch (Exception e) {
+            return this.getErrorModel(e.getMessage());
+        }
+    }
+
+    @PostMapping({"/api/getWendaContent/yiliao/active"})
+    public ResultModel getWendaContentYiliaoActive(@RequestBody WenDaParam wenDaParam) {
+        try {
+            log.info("getWendaContentYiliaoActive str:{}",wenDaParam);
+            if (ObjectUtil.isEmpty(wenDaParam)) {
+                return this.getErrorModel("参数为空2");
+            }
+            String testStr = wenDaParam.getPrompt();
+            String result = KeywordStrategyFactory.checkPrompt(testStr);
+            log.info("getWendaContentYiliaoActive str:{}",testStr);
+            String prompt = wenDaParam.getPrompt();
+            log.info("getWendaContentYiliaoActive str:{}",prompt);
+            WenDaBody wenDaBody = null;
+            Map resultJson = new HashMap();
+            resultJson.put("tag","javaApi");
+            if (StrUtil.isNotEmpty(result) ) {
+                String character = wenDaParam.getCharacter();
+                
+                boolean isWakeUpSuccess = false;
+                String welcomeText = "";
+                
+                if ("wy1".equals(character) && "万维".equals(result)) {
+                    welcomeText = "你好呀,我是展厅数字人,请问有什么我可以帮您";
+                    isWakeUpSuccess = true;
+                } else if ("wy2".equals(character) && "小万".equals(result)) {
+                    welcomeText = "你好呀,我是心理健康数字人,请问有什么我可以帮您";
+                    isWakeUpSuccess = true;
+                } else if ("wy3".equals(character) && "小电".equals(result)) {
+                    welcomeText = "你好呀,我是知识讲解数字人,请问有什么我可以帮您";
+                    isWakeUpSuccess = true;
+                } else if ("wy4".equals(character) && "小光".equals(result)) {
+                    welcomeText = "你好呀,我是医疗陪护数字人,请问有什么我可以帮您";
+                    isWakeUpSuccess = true;
+                } else if ("wy5".equals(character) && "小康".equals(result)) {
+                    welcomeText = "你好呀,我是中医数字人,请问有什么我可以帮您";
+                    isWakeUpSuccess = true;
+                }
+                
+                if (isWakeUpSuccess) {
+                    resultJson.put("type","echo");
+                    resultJson.put("dataTpye","wenda_Hello");
+                    resultJson.put("text", welcomeText);
+                    log.info("getWendaContentYiliaoActive 唤醒成功 character:{}, result:{}", character, result);
+                    final String sessionId = wenDaParam.getSession_id();
+                    redisTemplate.opsForValue().set(questionWaitingKey + sessionId, maxQuestionWaitingCount, 30, TimeUnit.SECONDS);
+                    return this.getSuccessModel(new Gson().toJson(resultJson));
+                }
+                
+                if (result.equals("再见")) {
+                    log.info("getWendaContentYiliaoActive 告别 str:{}",wenDaParam.getPrompt());
+                    redisTemplate.delete(questionWaitingKey + wenDaParam.getSession_id());
+                    resultJson.put("type","echo");
+                    resultJson.put("dataTpye","wenda_Hello");
+                    resultJson.put("text","好的,希望下次再见");
+                    log.info("getWendaContentYiliaoActive 告别 str:{}",wenDaParam.getPrompt());
+                    return this.getSuccessModel(new Gson().toJson(resultJson));
+                }
+                if (!redisTemplate.hasKey(questionWaitingKey)) {
+                    return this.getErrorModel("没有激活小云,请先唤醒小云");
+                }
+            }
+            Gson gson = new Gson();
+            String jsonStr = gson.toJson(resultJson);
+            resultJson.put("type","chat");
+            resultJson.put("dataTpye","wenda_content");
             resultJson.put("text",result);
             return this.getSuccessModel(jsonStr);
         } catch (Exception e) {

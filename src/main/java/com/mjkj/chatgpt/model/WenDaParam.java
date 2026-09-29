@@ -9,4 +9,5 @@ public class WenDaParam {
     private String prompt; //问题
     private String step; //步骤
     private String memory_name; //记忆名称
+    private String character; //角色
 }

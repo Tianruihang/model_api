@@ -32,6 +32,13 @@ public class KeywordStrategyFactory {
             new SuiXinZhiDaiZDHK(),
             new ShangHuShouKuanMa(),
             new GeRenJiQiJieShouHui(),
+            new WenYunStrategy(),
+            //增加
+            new XiaoWanStrategy(),
+            new XiaoGuangStrategy(),
+            new XiaoDianStrategy(),
+            new XiaoKangStrategy(),
+            new ByeStrategy(),
             new DefaultStrategy() // 必须放在最后
     );
 

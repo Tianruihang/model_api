@@ -1,8 +1,11 @@
 package com.mjkj.chatgpt.config;
+
 import com.mjkj.chatgpt.service.BankQuestionService;
 import com.mjkj.chatgpt.service.IChatGPTService;
+import com.mjkj.chatgpt.service.NavigationManagerService;
 import com.mjkj.chatgpt.service.QuestionAnalysisService;
 import com.mjkj.chatgpt.service.QuestionStatisticsService;
+import com.mjkj.chatgpt.service.impl.BatteryCheckService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,13 +18,22 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 @Service
 @EnableScheduling
-@RequiredArgsConstructor
 public class ApiCallerService {
+    
+    @Autowired
+    private NavigationManagerService navigationManagerService;
+    
+    @Autowired
+    private BatteryCheckService batteryCheckService;
+    
+    private final List<String> defaultDestinations = Arrays.asList("A", "B", "C", "D", "E");
     // API调用间隔（秒）
     @Value("${api.caller.interval:30}")
     private int interval;
@@ -41,58 +53,58 @@ public class ApiCallerService {
     /**
      * 定时调用API的方法
      */
-    @Scheduled(fixedRateString = "${apiCallerProperties.interval:1}000")
-    public void callApiTask() {
-        if (!redisTemplate.hasKey(currentCountKey)){
-            // 如果Redis中没有当前计数的键，则初始化为1
-            redisTemplate.opsForValue().set(currentCountKey, 1);
-            log.info("Redis中没有当前计数的键，已初始化为1");
-        } else {
-            int counter =  (int) redisTemplate.opsForValue().get(currentCountKey);
-            //判断当前计数是否超过最大值
-            if (counter >= 40 ) {
-                // 初始化或获取顺序播放索引
-                if (!redisTemplate.hasKey(videoIndexKey)) {
-                    redisTemplate.opsForValue().set(videoIndexKey, 1);
-                }
-                int currentVideoIndex = (int) redisTemplate.opsForValue().get(videoIndexKey);
-                String num = "explain" + currentVideoIndex + ".mp4";
-                boolean boo = chatGPTService.pushVideoToFront(num);
-                if (boo) {
-                    // 播放成功后，索引顺序递增并循环到1-7
-                    int nextVideoIndex = currentVideoIndex >= 7 ? 1 : currentVideoIndex + 1;
-                    redisTemplate.opsForValue().set(videoIndexKey, nextVideoIndex);
-                    // 如果API调用成功，重置计数器
-                    redisTemplate.opsForValue().set(currentCountKey, -40);
-                    log.info("API调用成功，顺序播放视频: {}，下一个索引: {}", num, nextVideoIndex);
-                } else {
-                    counter++;
-                    redisTemplate.opsForValue().set(currentCountKey, counter);
-                }
-            } else {
-                counter++;
-                redisTemplate.opsForValue().set(currentCountKey, counter);
-                log.info("当前计数为: " + counter + "，未达到调用API的条件");
-            }
-        }
-        // 获取限制调用次数
-        if (redisTemplate.hasKey(limitCountKey)){
-            int counter = (int) redisTemplate.opsForValue().get(limitCountKey);
-            if (counter >= 30){
-               chatGPTService.pushVideoToFront("answerError.mp4");
-                // 如果API调用成功，重置计数器
-                redisTemplate.opsForValue().set(currentCountKey, 0);
-                //清除limitCountKey
-                redisTemplate.delete(limitCountKey);
-                //删除questionSetKey
-                redisTemplate.delete(questionSetKey);
-            }else {
-                counter++;
-                redisTemplate.opsForValue().set(limitCountKey, counter);
-            }
+    //@Scheduled(fixedRateString = "${apiCallerProperties.interval:1}000")
+    // public void callApiTask() {
+    //     if (!redisTemplate.hasKey(currentCountKey)){
+    //         // 如果Redis中没有当前计数的键，则初始化为1
+    //         redisTemplate.opsForValue().set(currentCountKey, 1);
+    //         log.info("Redis中没有当前计数的键，已初始化为1");
+    //     } else {
+    //         int counter =  (int) redisTemplate.opsForValue().get(currentCountKey);
+    //         //判断当前计数是否超过最大值
+    //         if (counter >= 40 ) {
+    //             // 初始化或获取顺序播放索引
+    //             if (!redisTemplate.hasKey(videoIndexKey)) {
+    //                 redisTemplate.opsForValue().set(videoIndexKey, 1);
+    //             }
+    //             int currentVideoIndex = (int) redisTemplate.opsForValue().get(videoIndexKey);
+    //             String num = "explain" + currentVideoIndex + ".mp4";
+    //             boolean boo = chatGPTService.pushVideoToFront(num);
+    //             if (boo) {
+    //                 // 播放成功后，索引顺序递增并循环到1-7
+    //                 int nextVideoIndex = currentVideoIndex >= 7 ? 1 : currentVideoIndex + 1;
+    //                 redisTemplate.opsForValue().set(videoIndexKey, nextVideoIndex);
+    //                 // 如果API调用成功，重置计数器
+    //                 redisTemplate.opsForValue().set(currentCountKey, -40);
+    //                 log.info("API调用成功，顺序播放视频: {}，下一个索引: {}", num, nextVideoIndex);
+    //             } else {
+    //                 counter++;
+    //                 redisTemplate.opsForValue().set(currentCountKey, counter);
+    //             }
+    //         } else {
+    //             counter++;
+    //             redisTemplate.opsForValue().set(currentCountKey, counter);
+    //             log.info("当前计数为: " + counter + "，未达到调用API的条件");
+    //         }
+    //     }
+    //     // 获取限制调用次数
+    //     if (redisTemplate.hasKey(limitCountKey)){
+    //         int counter = (int) redisTemplate.opsForValue().get(limitCountKey);
+    //         if (counter >= 30){
+    //            chatGPTService.pushVideoToFront("answerError.mp4");
+    //             // 如果API调用成功，重置计数器
+    //             redisTemplate.opsForValue().set(currentCountKey, 0);
+    //             //清除limitCountKey
+    //             redisTemplate.delete(limitCountKey);
+    //             //删除questionSetKey
+    //             redisTemplate.delete(questionSetKey);
+    //         }else {
+    //             counter++;
+    //             redisTemplate.opsForValue().set(limitCountKey, counter);
+    //         }
 
-        }
-    }
+    //     }
+    // }
 
     /**
      *  定时归档
@@ -113,5 +125,24 @@ public class ApiCallerService {
 //        statisticsService.generateAndSaveStatistics(new java.util.Date());
 //        log.info("统计数据生成完成");
 //    }
+
+    /**
+     * 定时导航任务：每天9点开始，每小时执行一次导航循环
+     */
+    //@Scheduled(cron = "0 0 9-17 * * ?")
+    // public void scheduledNavigationTask() {
+    //     log.info("定时导航任务执行中...");
+    //     try {
+    //         ((com.mjkj.chatgpt.service.impl.NavigationManagerServiceImpl) navigationManagerService).startNavigationLoopFromConfig();
+    //         log.info("定时导航任务启动成功，从配置文件加载导航地点");
+    //     } catch (Exception e) {
+    //         log.error("定时导航任务执行失败: {}", e.getMessage());
+    //     }
+    // }
+    
+    @Scheduled(fixedRate = 1800000)
+    public void checkBatteryStatus() {
+        batteryCheckService.checkBatteryStatus();
+    }
 
 }
